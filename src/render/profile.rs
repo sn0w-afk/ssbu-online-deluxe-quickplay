@@ -543,9 +543,14 @@ impl RenderProfileManager {
 
 pub(crate) fn match_init() {
     let is_valid_online_mode = is_valid_online_mode();
-    let is_connected = is_connected();
     let match_status = get_match_status();
-    let in_real_online_match = is_connected && match_status != MatchStatus::Training;
+    // NOTE: In quickplay, the pia station connection is not necessarily
+    // established/registered yet when the match starts, so is_connected() can
+    // be false even though this is a real online match. Treat any tracked
+    // valid online mode as an online match so the selected profile gets
+    // applied instead of falling back to the offline one.
+    let in_real_online_match =
+        match_status != MatchStatus::Training && (is_valid_online_mode || is_connected());
 
     if in_real_online_match {
         if is_valid_online_mode {

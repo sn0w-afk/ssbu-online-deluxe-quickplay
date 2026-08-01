@@ -4,7 +4,6 @@ use std::sync::atomic::{AtomicI8, Ordering};
 use skyline::hooks::InlineCtx;
 
 use crate::input_poll::InputSnapshot;
-use crate::net;
 
 const MAX_INPUT_BUFFER: u8 = 25;
 const VALUE_UNKNOWN: i8 = i8::MIN;
@@ -146,21 +145,24 @@ impl LatencySliderManager {
 
 #[skyline::hook(offset = 0x16ccc58, inline)]
 unsafe fn set_online_latency(ctx: &InlineCtx) {
-    if net::is_valid_online_mode() {
-        println!("SET ONLINE LATENCY");
-        let auto = *(ctx.registers[19].x() as *mut u8);
-        LAST_AUTO.store(auto as i8, Ordering::SeqCst);
-        let buffer = LatencySliderManager::instance()
-            .selected_latency
-            .buffer
-            .load(Ordering::SeqCst);
-        LatencySliderManager::instance()
-            .active_latency
-            .buffer
-            .store(buffer, Ordering::SeqCst);
-        if buffer >= 0 {
-            *(ctx.registers[19].x() as *mut u8) = buffer as u8;
-        }
+    // NOTE: This hook is intentionally not gated by the current online mode.
+    // It only ever fires when the game itself computes the input delay for a
+    // networked match (arena, local online, quickplay), and quickplay matches
+    // started via background matchmaking may not have a tracked mode at this
+    // point. This mirrors the behavior of the original latency-slider mod.
+    println!("SET ONLINE LATENCY");
+    let auto = *(ctx.registers[19].x() as *mut u8);
+    LAST_AUTO.store(auto as i8, Ordering::SeqCst);
+    let buffer = LatencySliderManager::instance()
+        .selected_latency
+        .buffer
+        .load(Ordering::SeqCst);
+    LatencySliderManager::instance()
+        .active_latency
+        .buffer
+        .store(buffer, Ordering::SeqCst);
+    if buffer >= 0 {
+        *(ctx.registers[19].x() as *mut u8) = buffer as u8;
     }
 }
 

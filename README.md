@@ -2,6 +2,30 @@
 
 A performance and online enhancement mod for **Super Smash Bros. Ultimate** that introduces latency controls, render optimizations, and real-time online information.
 
+---
+
+> ## 🍴 Quickplay Fork
+>
+> This fork adds **Quickplay / Elite Smash support** to SSBU Online Deluxe. The original mod only works in Online Arenas and Local Online; with this version, the mod's features also work in quickplay:
+>
+> - **Latency slider in quickplay**: set your own input delay (0f-25f or Auto) for quickplay/Elite Smash matches, just like arenas. Adjust it from the overlay UI (`ZL + ZR + D-Pad Down`) on the character select screen, or from the arena UI as before — the setting carries over.
+> - **Render profiles in quickplay**: your selected NetProfile (LessLag, LLUltra, etc. — vsync off / reduced input delay) is now applied when a quickplay match starts, instead of being forced back to Vanilla. Auto mode applies your `online_match` config defaults in quickplay too.
+> - Opponent ping / connection info in quickplay via the overlay UI.
+>
+> ### Changes from the original ([saad-script/ssbu-online-deluxe](https://github.com/saad-script/ssbu-online-deluxe))
+>
+> - The quickplay (`online_melee_any`) and background-matchmaking scenes are now tracked as a proper online mode (`OnlineQuickplay`) instead of resetting the mod's mode state to Offline, so all mode-gated features (latency hook, CSS/overlay UI, render profiles) stay active in quickplay.
+> - The `set_online_latency` hook is no longer gated by online mode (same approach as [latency-slider-de](https://github.com/Naxdy/latency-slider-de)), so the latency override also applies to quickplay matches started via background matchmaking, where the tracked mode may have been reset by passing through the main menu.
+> - A fallback detects untracked online matches at match start (e.g. background matchmaking via the main menu) and treats them as quickplay.
+> - The CSS screen UI now has a quickplay-specific path (the arena banner-pane layout does not exist on the quickplay/Elite Smash CSS).
+> - `match_init` no longer relies on the pia connection state to detect an online match — in quickplay the connection is not registered yet at stage load, which previously made the game fall back to the offline (Vanilla) render profile.
+>
+> Build: see `build.sh` (requires the `skyline-v3` rustup toolchain; `cargo skyline update-std` equivalent setup). `elf2nro/` is a small helper that converts the built ELF to `.nro` (same `linkle`-based conversion `cargo skyline` performs).
+>
+> ---
+
+A performance and online enhancement mod for **Super Smash Bros. Ultimate** that introduces latency controls, render optimizations, and real-time online information.
+
 > ⚠️ This is a work in progress. Features and stability may change as development continues.  
 > ⚠️ Use at your own risk. I have been testing this mod online personally without any major issues, but there is still a non-zero risk of a ban. The overclocks are intentionally minimal; however, any hardware damage or account penalties remain your responsibility.  
 
@@ -79,6 +103,7 @@ Verify that your sdcard directory strucure looks like this on your switch or emu
 
 ### Native UI (Online Character Select Screen and Online Arena)
 
+> Note: The character select screen UI is also available in Quickplay (including Elite Smash).
 > Note: `All Shoulder Buttons` = `L + R + Z` on gamecube controller, `ZL + ZR + L + R` on procontroller
 
 - On the character select screen or online arena:
@@ -115,7 +140,7 @@ See 'Features' section below to see what these options do
   - Opponent’s current network/render settings (latency slider, render profile)
 
 ### 🎛️ Online Latency Controls
-*(Available in Online Arena and Local Online modes only)*
+*(Available in Online Arena, Quickplay, and Local Online modes)*
 
 - This allows you to control the online latency delay frames.
 - Adjust:
@@ -126,7 +151,7 @@ See 'Features' section below to see what these options do
 > It is recommended to manually set the latency delay frames based on the ping and connection quality.
 
 ### 🎛️ Render Profile Controls
-*(Available in Online Arena and Local Online modes only)*
+*(Available in Online Arena, Quickplay, and Local Online modes)*
 
 - This allows you to set the games render/graphic settings for less native input delay.
 - Adjust:

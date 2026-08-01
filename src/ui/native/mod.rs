@@ -217,6 +217,87 @@ pub unsafe fn update_css_ui(banner_pane1_ptr: *mut Pane) {
     });
 }
 
+// Quickplay/Elite Smash CSS UI.
+//
+// The quickplay CSS uses a different layout than the arena/local CSS, so the
+// banner-pane based `update_css_ui` cannot be used here. Instead, this uses
+// the same approach as latency-slider-de: locate the VIP title panes by name
+// and draw the current settings onto them. Everything is checked, because
+// panicking here would abort the game mid-matchmaking (panic = "abort").
+pub unsafe fn update_quickplay_css_ui(any_pane: *mut Pane) {
+    static mut ORIG_VIP_TEXT: [Option<String>; 2] = [None, None];
+
+    NATIVE_POLLER.poll();
+    let input_snapshot = NATIVE_POLLER.snapshot();
+    let streamer_mode = poll_streamer_mode(&input_snapshot);
+
+    let toggle_overlay_buttons = check_overlay_toggle_buttons_pressed(&input_snapshot);
+    if !crate::ui::overlay::is_window_interactable() && toggle_overlay_buttons.is_empty() {
+        LatencySliderManager::instance().poll(
+            &input_snapshot,
+            ninput::Buttons::LEFT,
+            ninput::Buttons::RIGHT,
+        );
+        RenderProfileManager::instance().poll(
+            &input_snapshot,
+            ninput::Buttons::DOWN,
+            ninput::Buttons::UP,
+        );
+    }
+
+    if any_pane.is_null() {
+        return;
+    }
+
+    // Walk up to the root pane, then search the whole tree by name.
+    let mut root = any_pane;
+    while let Some(parent) = (*root).parent() {
+        root = parent as *mut Pane;
+    }
+
+    let vip_panes = [
+        (*root).find_child("txt_vip_title_00", true),
+        (*root).find_child("txt_vip_title_01", true),
+    ];
+
+    let latency = LatencySliderManager::instance().selected_latency();
+    let rp = RenderProfileManager::instance().selected_render_profile();
+    let rp_str = match RenderProfileManager::instance().is_auto_mode() {
+        true => format!("Auto({})", rp),
+        false => rp.to_string(),
+    };
+    let labels = [
+        format!("Input Latency: {}", latency.to_string()),
+        format!("Render Profile: {}", rp_str),
+    ];
+
+    for (i, pane) in vip_panes.into_iter().enumerate() {
+        let Some(pane) = pane else { continue };
+        let tb = pane.as_textbox();
+
+        #[allow(static_mut_refs)]
+        if ORIG_VIP_TEXT[i].is_none() {
+            // Capture the original text once so streamer mode can restore it.
+            let buf_len = (tb.text_buf_len as usize).min(256);
+            let text_buf_slice = std::slice::from_raw_parts(tb.text_buf as *const u16, buf_len);
+            let len = text_buf_slice
+                .iter()
+                .position(|&c| c == 0)
+                .unwrap_or(buf_len);
+            ORIG_VIP_TEXT[i] = String::from_utf16(&text_buf_slice[..len]).ok();
+        }
+
+        #[allow(static_mut_refs)]
+        if streamer_mode {
+            if let Some(orig) = &ORIG_VIP_TEXT[i] {
+                tb.set_text_string(orig);
+            }
+        } else {
+            tb.set_text_string(&labels[i]);
+        }
+    }
+}
+
 pub unsafe fn update_local_online_ui(pane_handle: *mut Pane) {
     NATIVE_POLLER.poll();
     let input_snapshot = NATIVE_POLLER.snapshot();

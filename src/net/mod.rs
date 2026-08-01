@@ -24,6 +24,7 @@ pub enum MatchConnectionStatus {
     Offline = 0,
     OnlineLocal = 1,
     OnlineArena = 2,
+    OnlineQuickplay = 3,
 }
 
 #[repr(u8)]
@@ -55,7 +56,7 @@ unsafe fn main_menu_init(_: &InlineCtx) {
 unsafe fn online_melee_any_init(_: &InlineCtx) {
     LOCAL_ROOM_PANE_HANDLE.store(0, Ordering::SeqCst);
     ONLINE_ARENA_PANE_HANDLE.store(0, Ordering::SeqCst);
-    MATCH_CONNECTION_STATUS.store(MatchConnectionStatus::Offline as u8, Ordering::SeqCst);
+    MATCH_CONNECTION_STATUS.store(MatchConnectionStatus::OnlineQuickplay as u8, Ordering::SeqCst);
     update_match_status(MatchStatus::Inactive, false);
 }
 
@@ -63,7 +64,7 @@ unsafe fn online_melee_any_init(_: &InlineCtx) {
 unsafe fn online_bg_matchmaking_init(_: &InlineCtx) {
     LOCAL_ROOM_PANE_HANDLE.store(0, Ordering::SeqCst);
     ONLINE_ARENA_PANE_HANDLE.store(0, Ordering::SeqCst);
-    MATCH_CONNECTION_STATUS.store(MatchConnectionStatus::Offline as u8, Ordering::SeqCst);
+    MATCH_CONNECTION_STATUS.store(MatchConnectionStatus::OnlineQuickplay as u8, Ordering::SeqCst);
     update_match_status(MatchStatus::Inactive, false);
 }
 
@@ -130,12 +131,31 @@ unsafe fn update_css(arg: u64) {
     if is_valid_online_mode() {
         let banner_pane1_ptr =
             (*((*((arg + 0xe58) as *const u64) + 0x10) as *const u64)) as *mut Pane;
-        crate::ui::native::update_css_ui(banner_pane1_ptr);
+        if is_online_quickplay_mode() {
+            // The quickplay/Elite Smash CSS uses a different layout than the
+            // arena/local CSS, so it needs its own UI handling.
+            crate::ui::native::update_quickplay_css_ui(banner_pane1_ptr);
+        } else {
+            crate::ui::native::update_css_ui(banner_pane1_ptr);
+        }
     }
     call_original!(arg);
 }
 
 fn update_match_status(match_status: MatchStatus, force_update: bool) {
+    // Fallback: if a real pia-connected match is starting while no online mode
+    // is being tracked, it can only be a quickplay match (arena and local
+    // online are tracked by their own scene hooks). This happens when the
+    // player passes through the main menu during background matchmaking,
+    // which resets the tracked connection status to Offline.
+    if matches!(match_status, MatchStatus::Singles | MatchStatus::Doubles)
+        && MATCH_CONNECTION_STATUS.load(Ordering::SeqCst) == MatchConnectionStatus::Offline as u8
+        && is_connected()
+    {
+        println!("UNTRACKED ONLINE MATCH DETECTED, ASSUMING QUICKPLAY");
+        MATCH_CONNECTION_STATUS.store(MatchConnectionStatus::OnlineQuickplay as u8, Ordering::SeqCst);
+    }
+
     let prev = MATCH_STATUS.swap(match_status as u8, Ordering::SeqCst);
     if prev != match_status as u8 || force_update {
         println!("UPDATE MATCH STATUS: {:?}", match_status);
@@ -161,12 +181,17 @@ pub fn is_online_arena_mode() -> bool {
 }
 
 #[inline]
+pub fn is_online_quickplay_mode() -> bool {
+    MATCH_CONNECTION_STATUS.load(Ordering::SeqCst) == MatchConnectionStatus::OnlineQuickplay as u8
+}
+
+#[inline]
 pub fn is_valid_online_mode() -> bool {
     #[cfg(feature = "dummy_connection")]
     return true;
 
     #[cfg(not(feature = "dummy_connection"))]
-    return is_online_arena_mode() || is_local_online_mode();
+    return is_online_arena_mode() || is_local_online_mode() || is_online_quickplay_mode();
 }
 
 #[inline]
