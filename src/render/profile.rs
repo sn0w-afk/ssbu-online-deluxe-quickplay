@@ -580,6 +580,27 @@ pub(crate) fn match_cleanup() {
     );
 }
 
+/// Re-applies the selected render profile if the live environment flags have
+/// drifted from it during a valid online match.
+///
+/// ssbusync forces a vanilla runtime for online matches it does not recognize
+/// as arena/local online (e.g. quickplay). That reset happens when the match
+/// actually starts, i.e. *after* `match_init` applied the selected profile at
+/// stage presetup, which made quickplay matches silently revert to Vanilla.
+/// Checking for drift every frame and re-applying once keeps the selected
+/// profile active for the whole match.
+pub(crate) fn maybe_reapply_match_profile() {
+    if !crate::net::is_valid_online_mode() || !crate::net::is_in_real_game() {
+        return;
+    }
+    let selected = RenderProfileManager::instance().selected_render_profile_settings();
+    let active = RenderProfileManager::active_render_profile_settings();
+    if selected.to_bits() != active.to_bits() {
+        println!("RENDER PROFILE DRIFT DETECTED, REAPPLYING SELECTED PROFILE");
+        RenderProfileManager::apply_render_profile_settings_immediate(&selected);
+    }
+}
+
 pub(super) fn on_nro_load() {
     let rc = RENDER_CONFIG.load();
     let menu_rp = rc.render_profile_config.menu;

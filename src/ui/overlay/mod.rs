@@ -570,6 +570,7 @@ unsafe fn draw_debug_table(first_col_width: f32) {
 
 unsafe extern "C" fn draw() {
     OVERLAY_POLLER.poll();
+    crate::render::profile::maybe_reapply_match_profile();
     let input_snapshot = OVERLAY_POLLER.snapshot();
     let toggle_window_buttons = check_overlay_toggle_buttons_pressed(&input_snapshot);
 
