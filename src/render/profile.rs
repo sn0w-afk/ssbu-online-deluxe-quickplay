@@ -583,12 +583,12 @@ pub(crate) fn match_cleanup() {
 /// Re-applies the selected render profile if the live environment flags have
 /// drifted from it during a valid online match.
 ///
-/// ssbusync forces a vanilla runtime for online matches it does not recognize
-/// as arena/local online (e.g. quickplay). That reset happens when the match
-/// actually starts, i.e. *after* `match_init` applied the selected profile at
-/// stage presetup, which made quickplay matches silently revert to Vanilla.
-/// Checking for drift every frame and re-applying once keeps the selected
-/// profile active for the whole match.
+/// ssbusync restricts its optimizations to offline/arena/local-online play: in
+/// quickplay it forces the vanilla runtime and silently drops non-vanilla
+/// env-flag requests. `net::mark_arena_mode_for_ssbusync` opts quickplay
+/// sessions out of that restriction, and this drift check is a safety net in
+/// case the flags still get reset (e.g. right at match start, after
+/// `match_init` applied the selected profile at stage presetup).
 pub(crate) fn maybe_reapply_match_profile() {
     if !crate::net::is_valid_online_mode() || !crate::net::is_in_real_game() {
         return;

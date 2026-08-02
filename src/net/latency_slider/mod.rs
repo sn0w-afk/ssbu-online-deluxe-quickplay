@@ -151,6 +151,9 @@ unsafe fn set_online_latency(ctx: &InlineCtx) {
     // started via background matchmaking may not have a tracked mode at this
     // point. This mirrors the behavior of the original latency-slider mod.
     println!("SET ONLINE LATENCY");
+    // A networked match is about to start; make sure ssbusync does not apply
+    // its quickplay restriction (forcing the vanilla runtime) for this match.
+    crate::net::mark_arena_mode_for_ssbusync();
     let auto = *(ctx.registers[19].x() as *mut u8);
     LAST_AUTO.store(auto as i8, Ordering::SeqCst);
     let buffer = LatencySliderManager::instance()

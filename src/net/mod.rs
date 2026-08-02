@@ -2,7 +2,7 @@ pub mod latency_slider;
 pub mod ldn;
 pub mod pia;
 
-use std::sync::atomic::{AtomicU64, AtomicU8, Ordering};
+use std::sync::atomic::{AtomicU64, AtomicU8, AtomicUsize, Ordering};
 
 use crate::net::ldn::interface::{get_network_role, NetworkRole};
 use skyline::hooks::InlineCtx;
@@ -58,6 +58,7 @@ unsafe fn online_melee_any_init(_: &InlineCtx) {
     ONLINE_ARENA_PANE_HANDLE.store(0, Ordering::SeqCst);
     MATCH_CONNECTION_STATUS.store(MatchConnectionStatus::OnlineQuickplay as u8, Ordering::SeqCst);
     update_match_status(MatchStatus::Inactive, false);
+    mark_arena_mode_for_ssbusync();
 }
 
 #[skyline::hook(offset = 0x22d9c40, inline)]
@@ -66,6 +67,7 @@ unsafe fn online_bg_matchmaking_init(_: &InlineCtx) {
     ONLINE_ARENA_PANE_HANDLE.store(0, Ordering::SeqCst);
     MATCH_CONNECTION_STATUS.store(MatchConnectionStatus::OnlineQuickplay as u8, Ordering::SeqCst);
     update_match_status(MatchStatus::Inactive, false);
+    mark_arena_mode_for_ssbusync();
 }
 
 #[skyline::hook(offset = 0x22d9b50, inline)]
@@ -217,6 +219,66 @@ pub fn get_match_status() -> MatchStatus {
         2 => MatchStatus::Doubles,
         3 => MatchStatus::Training,
         _ => MatchStatus::Inactive,
+    }
+}
+
+const SSBUSYNC_MARK_ARENA_MODE_SYMBOL: &[u8] = b"ssbusync_restrict_mark_arena_mode\0";
+static MARK_ARENA_MODE_ADDR: AtomicUsize = AtomicUsize::new(0);
+static MARK_ARENA_MODE_COUNTDOWN: AtomicU64 = AtomicU64::new(0);
+
+fn mark_arena_mode_addr() -> Option<usize> {
+    match MARK_ARENA_MODE_ADDR.load(Ordering::Acquire) {
+        0 => {
+            let addr = crate::utils::lookup_symbol_addr(SSBUSYNC_MARK_ARENA_MODE_SYMBOL)
+                .unwrap_or(usize::MAX);
+            MARK_ARENA_MODE_ADDR.store(addr, Ordering::Release);
+            if addr == usize::MAX {
+                None
+            } else {
+                Some(addr)
+            }
+        }
+        usize::MAX => None,
+        addr => Some(addr),
+    }
+}
+
+/// ssbusync restricts its runtime optimizations (vsync off, double buffering,
+/// etc.) to offline, arena, and local-online play. When a pia connection is
+/// established without a recognized online mode marked, it forces the vanilla
+/// runtime and keeps rejecting any non-vanilla env-flag request while in that
+/// state — which is exactly the quickplay/Elite Smash case. ssbusync exports
+/// `ssbusync_restrict_mark_arena_mode` so companion plugins can mark the
+/// session as an arena; calling it during quickplay keeps the selected render
+/// profile from being force-reverted to Vanilla.
+pub fn mark_arena_mode_for_ssbusync() {
+    if let Some(addr) = mark_arena_mode_addr() {
+        let func: extern "C" fn() = unsafe { std::mem::transmute(addr) };
+        func();
+    }
+}
+
+/// Throttled variant of `mark_arena_mode_for_ssbusync` for per-frame callers.
+/// ssbusync clears its online-mode flags on every menu/scene transition, so
+/// the arena mark must be refreshed periodically; but each call also writes a
+/// log line, so this marks at most once every ~60 frames to avoid log spam.
+pub fn mark_arena_mode_for_ssbusync_throttled() {
+    let countdown = MARK_ARENA_MODE_COUNTDOWN.load(Ordering::Relaxed);
+    if countdown > 0 {
+        MARK_ARENA_MODE_COUNTDOWN.store(countdown - 1, Ordering::Relaxed);
+        return;
+    }
+    MARK_ARENA_MODE_COUNTDOWN.store(60, Ordering::Relaxed);
+    mark_arena_mode_for_ssbusync();
+}
+
+/// Keeps ssbusync's arena mark set whenever a quickplay restriction could
+/// apply: while the quickplay scene is being tracked, or while a pia
+/// connection exists (covers background matchmaking, where the tracked
+/// connection status may have been reset by passing through the main menu).
+pub fn enforce_ssbusync_arena_mark() {
+    if is_online_quickplay_mode() || is_connected() {
+        mark_arena_mode_for_ssbusync_throttled();
     }
 }
 
