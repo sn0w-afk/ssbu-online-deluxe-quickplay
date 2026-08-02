@@ -71,7 +71,7 @@ A performance and online enhancement mod for **Super Smash Bros. Ultimate** that
   - ~~[ssbusync](https://github.com/project-ultelier/smash-ultelier/releases)~~
     - ⚠️ Currently outdated. Use the version bundled into the ssbu-online-deluxe release zip.
 - Then you can install the latest release of ssbu-online-deluxe: [ssbu-online-deluxe](https://github.com/saad-script/ssbu-online-deluxe/releases)
-  - 🍴 **Quickplay fork**: install the original release as above, then replace `libssbu_online_deluxe.nro` with the one from [this fork's releases](https://github.com/sn0w-afk/ssbu-online-deluxe/releases).
+  - 🍴 **Quickplay fork**: install the original release as above, then replace `libssbu_online_deluxe.nro` with the one from [this fork's releases](https://github.com/sn0w-afk/ssbu-online-deluxe-quickplay/releases).
 
 
 ### Automatic Installation
