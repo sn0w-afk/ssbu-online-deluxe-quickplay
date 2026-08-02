@@ -9,18 +9,36 @@ A performance and online enhancement mod for **Super Smash Bros. Ultimate** that
 > This fork adds **Quickplay / Elite Smash support** to SSBU Online Deluxe. The original mod only works in Online Arenas and Local Online; with this version, the mod's features also work in quickplay:
 >
 > - **Latency slider in quickplay**: set your own input delay (0f-25f or Auto) for quickplay/Elite Smash matches, just like arenas. Adjust it from the overlay UI (`ZL + ZR + D-Pad Down`) on the character select screen, or from the arena UI as before — the setting carries over.
-> - **Render profiles in quickplay**: your selected NetProfile (LessLag, LLUltra, etc. — vsync off / reduced input delay) is now applied when a quickplay match starts, instead of being forced back to Vanilla. Auto mode applies your `online_match` config defaults in quickplay too.
+> - **Render profiles in quickplay**: your selected NetProfile (LessLag, LLUltra, etc. — vsync off / reduced input delay) is applied when a quickplay match starts and stays active for the whole match, instead of being forced back to Vanilla. Auto mode applies your `online_match` config defaults in quickplay too.
 > - Opponent ping / connection info in quickplay via the overlay UI.
+>
+> **Known limitation**: on the quickplay/Elite Smash character select screen, the on-banner text UI (latency/profile readout) does not display — the quickplay VIP banner layout is different from the arena one. Use the overlay UI (`ZL + ZR + D-Pad Down`) instead; it works everywhere.
+>
+> ### Installation (fork)
+>
+> Follow the original mod's installation instructions below (prerequisites + folder layout), then replace `sd:/atmosphere/contents/01006A800016E000/romfs/skyline/plugins/libssbu_online_deluxe.nro` with the `libssbu_online_deluxe.nro` from **this repo's releases page**. Keep the bundled `libssbusync.nro` from the original release — this fork requires it.
 >
 > ### Changes from the original ([saad-script/ssbu-online-deluxe](https://github.com/saad-script/ssbu-online-deluxe))
 >
-> - The quickplay (`online_melee_any`) and background-matchmaking scenes are now tracked as a proper online mode (`OnlineQuickplay`) instead of resetting the mod's mode state to Offline, so all mode-gated features (latency hook, CSS/overlay UI, render profiles) stay active in quickplay.
-> - The `set_online_latency` hook is no longer gated by online mode (same approach as [latency-slider-de](https://github.com/Naxdy/latency-slider-de)), so the latency override also applies to quickplay matches started via background matchmaking, where the tracked mode may have been reset by passing through the main menu.
-> - A fallback detects untracked online matches at match start (e.g. background matchmaking via the main menu) and treats them as quickplay.
-> - The CSS screen UI now has a quickplay-specific path (the arena banner-pane layout does not exist on the quickplay/Elite Smash CSS).
-> - `match_init` no longer relies on the pia connection state to detect an online match — in quickplay the connection is not registered yet at stage load, which previously made the game fall back to the offline (Vanilla) render profile.
+> All changes are in `src/`; the mod is otherwise identical to upstream v1.2.0.
 >
-> Build: see `build.sh` (requires the `skyline-v3` rustup toolchain; `cargo skyline update-std` equivalent setup). `elf2nro/` is a small helper that converts the built ELF to `.nro` (same `linkle`-based conversion `cargo skyline` performs).
+> **Quickplay mode tracking** (`src/net/mod.rs`)
+> - Added a `MatchConnectionStatus::OnlineQuickplay` mode. The quickplay (`online_melee_any`) and background-matchmaking (`online_bg_matchmaking_seq`) scene hooks now set it instead of resetting the mod's mode state to Offline, so all mode-gated features (latency hook, CSS/overlay UI, render profiles) stay active in quickplay.
+> - `is_valid_online_mode()` includes quickplay; `update_css` routes the quickplay CSS to a quickplay-specific UI path.
+> - Fallback: if a pia-connected match starts while no online mode is tracked (background matchmaking via the main menu resets the tracked mode), the match is treated as quickplay.
+>
+> **Latency slider** (`src/net/latency_slider/mod.rs`)
+> - The `set_online_latency` hook is no longer gated by the tracked online mode (same approach as [latency-slider-de](https://github.com/Naxdy/latency-slider-de)), so the latency override also applies to quickplay matches started via background matchmaking.
+>
+> **Quickplay CSS UI** (`src/ui/native/mod.rs`)
+> - Added `update_quickplay_css_ui`: polls the same inputs as the arena CSS UI and writes the latency/profile text by searching the quickplay CSS pane tree for the `txt_vip_title_*` panes by name (the arena banner-pane traversal does not exist on the quickplay CSS, and running it there crashed the network session). See the known limitation above.
+>
+> **Render profiles in quickplay** (`src/render/profile.rs`, `src/net/mod.rs`, `src/ui/overlay/mod.rs`)
+> - `match_init` no longer relies on the pia connection state to detect an online match — in quickplay the connection is not necessarily registered yet at stage load, which previously made the game fall back to the offline (Vanilla) render profile.
+> - **ssbusync restriction bypass (the actual "reverts to Vanilla" fix).** The bundled `libssbusync.nro` deliberately restricts its runtime optimizations (vsync off, double buffering, reduced frame index) to offline, arena, and local-online play: when a match connects without a recognized online mode, it logs *"SsbuSync runtime optimizations may only be used on offline, online arena, or local online! Forcing vanilla runtime..."*, and its per-frame env-flag consumer silently **drops** any non-vanilla flag request while in that state (which is why re-applying the profile every frame could not work). ssbusync exports `ssbusync_restrict_mark_arena_mode` so companion plugins can mark the session type; this fork calls it when entering the quickplay/background-matchmaking scenes, when a match starts, and refreshes it once per second from the overlay draw loop (ssbusync clears its mode flags on every scene transition; the throttle avoids log spam). With the session marked, quickplay behaves exactly like arena mode.
+> - `maybe_reapply_match_profile()`: per-frame safety net that re-applies the selected render profile if the live env flags drift from it during an online match.
+>
+> Build: see `build.sh` (requires the `skyline-v3` rustup toolchain; `cargo skyline update-std` equivalent setup).
 >
 > ---
 
@@ -53,6 +71,7 @@ A performance and online enhancement mod for **Super Smash Bros. Ultimate** that
   - ~~[ssbusync](https://github.com/project-ultelier/smash-ultelier/releases)~~
     - ⚠️ Currently outdated. Use the version bundled into the ssbu-online-deluxe release zip.
 - Then you can install the latest release of ssbu-online-deluxe: [ssbu-online-deluxe](https://github.com/saad-script/ssbu-online-deluxe/releases)
+  - 🍴 **Quickplay fork**: install the original release as above, then replace `libssbu_online_deluxe.nro` with the one from [this fork's releases](https://github.com/justinsnow11/ssbu-online-deluxe-quickplay/releases).
 
 
 ### Automatic Installation
