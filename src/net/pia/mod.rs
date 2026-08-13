@@ -140,6 +140,15 @@ fn on_station_connection_changed(
 }
 
 fn send_pia_data_hook(_station: ConnectedStation, data: &mut [u8]) {
+    // Stealth mode: never broadcast our latency/render profile. Zero the buffer
+    // so receivers deterministically reject the packet (version 0 is invalid),
+    // making us indistinguishable from a vanilla player. We still parse
+    // incoming packets in receive_pia_data_hook, so we keep seeing modded
+    // opponents' extended info.
+    if crate::render::stealth_mode_enabled() {
+        data.fill(0);
+        return;
+    }
     let latency_bits = LatencySliderManager::instance()
         .active_latency()
         .unwrap_or_else(|| LatencySliderManager::instance().selected_latency())
