@@ -133,13 +133,7 @@ unsafe fn update_css(arg: u64) {
     if is_valid_online_mode() {
         let banner_pane1_ptr =
             (*((*((arg + 0xe58) as *const u64) + 0x10) as *const u64)) as *mut Pane;
-        if is_online_quickplay_mode() {
-            // The quickplay/Elite Smash CSS uses a different layout than the
-            // arena/local CSS, so it needs its own UI handling.
-            crate::ui::native::update_quickplay_css_ui(banner_pane1_ptr);
-        } else {
-            crate::ui::native::update_css_ui(banner_pane1_ptr);
-        }
+        crate::ui::native::update_css_ui(banner_pane1_ptr);
     }
     call_original!(arg);
 }

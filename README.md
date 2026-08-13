@@ -11,12 +11,13 @@ A performance and online enhancement mod for **Super Smash Bros. Ultimate** that
 > - **Latency slider in quickplay**: set your own input delay (0f-25f or Auto) for quickplay/Elite Smash matches, just like arenas. Adjust it from the overlay UI (`ZL + ZR + D-Pad Down`) on the character select screen, or from the arena UI as before — the setting carries over.
 > - **Render profiles in quickplay**: your selected NetProfile (LessLag, LLUltra, etc. — vsync off / reduced input delay) is applied when a quickplay match starts and stays active for the whole match, instead of being forced back to Vanilla. Auto mode applies your `online_match` config defaults in quickplay too.
 > - Opponent ping / connection info in quickplay via the overlay UI.
+> - **Stealth mode**: set `stealth_mode = true` in `config.toml` to never broadcast your latency/render-profile info — opponents on any version of the mod see and log nothing, as if you were a vanilla console — while you still see their extended info. See the config section below.
 >
 > **Known limitation**: on the quickplay/Elite Smash character select screen, the on-banner text UI (latency/profile readout) does not display — the quickplay VIP banner layout is different from the arena one. Use the overlay UI (`ZL + ZR + D-Pad Down`) instead; it works everywhere.
 >
 > ### Installation (fork)
 >
-> Follow the original mod's installation instructions below (prerequisites + folder layout), then replace `sd:/atmosphere/contents/01006A800016E000/romfs/skyline/plugins/libssbu_online_deluxe.nro` with the `libssbu_online_deluxe.nro` from **this repo's releases page**. Keep the bundled `libssbusync.nro` from the original release — this fork requires it.
+> This fork is **fully standalone** — see the [📦 Installation](#-installation) section below. Our release zip bundles everything the original release did (skyline runtime, overclock sysmodule, `libnx_over.nro`, compatible `libssbusync.nro`), plus this fork's `libssbu_online_deluxe.nro` and a ready-to-use `config.toml` with stealth mode enabled.
 >
 > ### Changes from the original ([saad-script/ssbu-online-deluxe](https://github.com/saad-script/ssbu-online-deluxe))
 >
@@ -38,6 +39,9 @@ A performance and online enhancement mod for **Super Smash Bros. Ultimate** that
 > - **ssbusync restriction bypass (the actual "reverts to Vanilla" fix).** The bundled `libssbusync.nro` deliberately restricts its runtime optimizations (vsync off, double buffering, reduced frame index) to offline, arena, and local-online play: when a match connects without a recognized online mode, it logs *"SsbuSync runtime optimizations may only be used on offline, online arena, or local online! Forcing vanilla runtime..."*, and its per-frame env-flag consumer silently **drops** any non-vanilla flag request while in that state (which is why re-applying the profile every frame could not work). ssbusync exports `ssbusync_restrict_mark_arena_mode` so companion plugins can mark the session type; this fork calls it when entering the quickplay/background-matchmaking scenes, when a match starts, and refreshes it once per second from the overlay draw loop (ssbusync clears its mode flags on every scene transition; the throttle avoids log spam). With the session marked, quickplay behaves exactly like arena mode.
 > - `maybe_reapply_match_profile()`: per-frame safety net that re-applies the selected render profile if the live env flags drift from it during an online match.
 >
+> **Stealth mode** (`src/render/mod.rs`, `src/net/pia/mod.rs`)
+> - New optional `stealth_mode` config key (default `false`). When enabled, the mod never registers the custom-comms send hook, so no packet carrying your latency/render profile is ever broadcast — opponents running any version of the mod receive nothing, see nothing in their overlay, and get nothing in their log, exactly as if you were a vanilla console. Incoming packets are still parsed, so you keep seeing modded opponents' extended info. Receivers also silently ignore version-0 packets (the zeroed-buffer stealth approach used by v1.2.0-quickplay.2), so stealth players on that build leave no log trace here either.
+>
 > Build: see `build.sh` (requires the `skyline-v3` rustup toolchain; `cargo skyline update-std` equivalent setup).
 >
 > ---
@@ -58,34 +62,34 @@ A performance and online enhancement mod for **Super Smash Bros. Ultimate** that
 
 > ⚠️ Remove any previous latency slider mod, vsync mod, and less lag mod before proceeding with the installation steps!
 
-### Manual Installation
+### Manual Installation (Console or Emulator)
 
-- Ensure you have these prerequisite installed on your switch/emulator:
-  - ~~[skyline](https://github.com/skyline-dev/skyline/releases)~~
-    - ⚠️ The latest version causes crashes. Use the version bundled into the ssbu-online-deluxe release zip.
-  - [arcropolis](https://github.com/raytwo/arcropolis/releases)
-  - [nro-hook](https://github.com/ultimate-research/nro-hook-plugin/releases)
-  - [smashline](https://github.com/HDR-Development/smashline/releases)
-  - [imgui-smash](https://github.com/Coolsonickirby/imgui-smash/releases)
-  - [ssbu-pia-manager](https://github.com/project-ultelier/ssbu-pia-interface/releases)
-  - ~~[ssbusync](https://github.com/project-ultelier/smash-ultelier/releases)~~
-    - ⚠️ Currently outdated. Use the version bundled into the ssbu-online-deluxe release zip.
-- Then you can install the latest release of ssbu-online-deluxe: [ssbu-online-deluxe](https://github.com/saad-script/ssbu-online-deluxe/releases)
-  - 🍴 **Quickplay fork**: install the original release as above, then replace `libssbu_online_deluxe.nro` with the one from [this fork's releases](https://github.com/sn0w-afk/ssbu-online-deluxe-quickplay/releases).
+> ⚠️ Remove any previous latency slider mod, vsync mod, and less lag mod before proceeding!
 
+1. **Download the latest Quickplay Edition release zip** from [this repo's releases page](https://github.com/sn0w-afk/ssbu-online-deluxe-quickplay/releases) and extract it. The zip bundles:
+   - The compatible **skyline runtime** (⚠️ do *not* substitute the latest public skyline release — it causes crashes)
+   - The **overclock sysmodule** (`atmosphere/contents/00FF0000A11CE0FF`) and `libnx_over.nro`
+   - The compatible **`libssbusync.nro`** (⚠️ the public ssbusync release is outdated — use the bundled one)
+   - **`libssbu_online_deluxe.nro`** (this fork's build, with quickplay support and stealth mode)
+   - A ready-to-use **`config.toml`** with stealth mode enabled (goes in `ultimate/ssbu_online_deluxe/`)
+2. Copy the `atmosphere/` and `ultimate/` folders from the extracted zip **to the root of your SD card** (or to your emulator's `sdmc/` folder).
+3. Install the remaining **public prerequisites** (not bundled — grab the latest release of each):
+   - [arcropolis](https://github.com/raytwo/arcropolis/releases)
+   - [nro-hook](https://github.com/ultimate-research/nro-hook-plugin/releases)
+   - [smashline](https://github.com/HDR-Development/smashline/releases)
+   - [imgui-smash](https://github.com/Coolsonickirby/imgui-smash/releases)
+   - [ssbu-pia-manager](https://github.com/project-ultelier/ssbu-pia-interface/releases)
 
-### Automatic Installation
+   Each plugin's `.nro` goes in `sd:/atmosphere/contents/01006A800016E000/romfs/skyline/plugins/`.
+4. **Eden emulator only**: right-click SSBU → `Configure Game` → `System` tab → check `RNG Seed` → set it to `00000000`.
+5. Boot the game. Open the overlay UI (`ZL + ZR + D-Pad Down`) on any online character select screen to confirm the mod is running.
 
-Console:
-- From the releases page, download `create-sdcard-folder.zip` and then run `create-sdcard-folder.bat`. On linux, you can install powershell for your distro and run `create-sdcard-folder.ps1`. It will download and setup the atmosphere folder for you in a newly created folder `sdcard/`. Then copy the contents of `sdcard/` to the root of your SD card.
-- Alternatively, you can use the app I made: [ssbu-emu-optimizer](https://github.com/saad-script/ssbu-emu-optimizer/releases). Install, then click `Generate SDCard Folder`, then copy the generate folder contents to the root of the sd card.
+### Automatic Installation (alternative)
 
-Emulator:
-- From the releases page, download `create-sdcard-folder.zip` and then run `create-sdcard-folder.bat`. On linux, you can install powershell for your distro and run `create-sdcard-folder.ps1`. It will download and setup the atmosphere folder for you in a newly created folder `sdcard/`. Then copy the contents of `sdcard/` to your `eden/sdmc` folder.
-  - Then, apply this workaround if you are on Eden emulator:
-    - Right click SSBU -> Click `Configure Game` -> Click `System` tab -> Check `RNG Seed` -> Set to `00000000`
-- Alternatively, you can use the app I made: [ssbu-emu-optimizer](https://github.com/saad-script/ssbu-emu-optimizer/releases). Install, and then configure it to point to the correct eden folder, then check `SSBU Settings`, `SSBU Mods`, `Save Data` (if you want a 100% save), then click optimize.
+You can generate the base SD card folder with the upstream tools, then replace `libssbu_online_deluxe.nro` with the one from [this fork's releases](https://github.com/sn0w-afk/ssbu-online-deluxe-quickplay/releases):
 
+- From the [original mod's releases](https://github.com/saad-script/ssbu-online-deluxe/releases), download `create-sdcard-folder.zip` and run `create-sdcard-folder.bat` (or `create-sdcard-folder.ps1` on Linux via PowerShell). Copy the generated `sdcard/` contents to your SD root (or `eden/sdmc` on emulator).
+- Or use the GUI app: [ssbu-emu-optimizer](https://github.com/saad-script/ssbu-emu-optimizer/releases) — click `Generate SDCard Folder` (on emulator, point it at your Eden folder and check `SSBU Settings`, `SSBU Mods`, and optionally `Save Data`), then copy the generated folder to your SD root.
 
 ### Verify
 
@@ -116,6 +120,9 @@ Verify that your sdcard directory strucure looks like this on your switch or emu
 │                       ├── libssbu_pia_manager.nro
 │                       └── libssbusync.nro
 │
+└── ultimate/
+    └── ssbu_online_deluxe/
+        └── config.toml
 ```
 
 ## 🎮 Controls
@@ -157,6 +164,7 @@ See 'Features' section below to see what these options do
   - Green=Stable, Yellow=Inconsistent, Red=Unstable
 - Show **extended opponent info** *(only if both players have the mod)*:
   - Opponent’s current network/render settings (latency slider, render profile)
+- 🥷 **Stealth mode** *(fork only)*: never broadcast your extended info — opponents on any mod version see and log nothing, as if you were vanilla — while you can still see theirs. Enabled via `stealth_mode = true` in `config.toml` (on by default in the bundled config).
 
 ### 🎛️ Online Latency Controls
 *(Available in Online Arena, Quickplay, and Local Online modes)*
@@ -214,10 +222,12 @@ You can specify a config file in `sd/ultimate/ssbu_online_deluxe/config.toml`
   - Delete `atmosphere/contents/00FF0000A11CE0FF/` sysmodule folder
   - Restart switch
 - All fields are optional. If you dont specify a field, it will use the default/recommended value.
+- **Stealth mode**: `stealth_mode` controls the "extended opponent info" broadcast. When `true`, the mod never broadcasts your latency/render-profile info — opponents running any version of the mod see nothing in their overlay and nothing in their log, exactly as if you were a vanilla console — while you can still see *their* extended info. The `config.toml` bundled with this fork's releases ships with `stealth_mode = true`. Set it to `false` if you want two-way extended info sharing. (Code default when the key is absent: `false`.)
 
 Example `config.toml`:
 ```
 overclocker = true                          # Set to 'false' if you are using your own overclock sysmodule
+stealth_mode = true                         # 'true' = never broadcast extended info; 'false' = share with modded opponents
 
 [render_profile_config]
 menu = "Vanilla"                            # Recommended to keep this on Vanilla always
