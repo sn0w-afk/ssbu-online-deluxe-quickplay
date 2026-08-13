@@ -11,7 +11,7 @@ A performance and online enhancement mod for **Super Smash Bros. Ultimate** that
 > - **Latency slider in quickplay**: set your own input delay (0f-25f or Auto) for quickplay/Elite Smash matches, just like arenas. Adjust it from the overlay UI (`ZL + ZR + D-Pad Down`) on the character select screen, or from the arena UI as before — the setting carries over.
 > - **Render profiles in quickplay**: your selected NetProfile (LessLag, LLUltra, etc. — vsync off / reduced input delay) is applied when a quickplay match starts and stays active for the whole match, instead of being forced back to Vanilla. Auto mode applies your `online_match` config defaults in quickplay too.
 > - Opponent ping / connection info in quickplay via the overlay UI.
-> - **Stealth mode**: set `stealth_mode = true` in `config.toml` to stop broadcasting your latency/render-profile info to modded opponents (you appear vanilla to them) while still seeing their extended info. See the config section below.
+> - **Stealth mode**: set `stealth_mode = true` in `config.toml` to never broadcast your latency/render-profile info — opponents on any version of the mod see and log nothing, as if you were a vanilla console — while you still see their extended info. See the config section below.
 >
 > **Known limitation**: on the quickplay/Elite Smash character select screen, the on-banner text UI (latency/profile readout) does not display — the quickplay VIP banner layout is different from the arena one. Use the overlay UI (`ZL + ZR + D-Pad Down`) instead; it works everywhere.
 >
@@ -40,7 +40,7 @@ A performance and online enhancement mod for **Super Smash Bros. Ultimate** that
 > - `maybe_reapply_match_profile()`: per-frame safety net that re-applies the selected render profile if the live env flags drift from it during an online match.
 >
 > **Stealth mode** (`src/render/mod.rs`, `src/net/pia/mod.rs`)
-> - New optional `stealth_mode` config key (default `false`). When enabled, `send_pia_data_hook` zeroes the broadcast buffer instead of writing the local latency/render-profile packet, so modded opponents reject the packet (version 0 is invalid) and see no extended info for you — identical on the wire to a vanilla player. Incoming packets are still parsed, so you keep seeing modded opponents' extended info.
+> - New optional `stealth_mode` config key (default `false`). When enabled, the mod never registers the custom-comms send hook, so no packet carrying your latency/render profile is ever broadcast — opponents running any version of the mod receive nothing, see nothing in their overlay, and get nothing in their log, exactly as if you were a vanilla console. Incoming packets are still parsed, so you keep seeing modded opponents' extended info. Receivers also silently ignore version-0 packets (the zeroed-buffer stealth approach used by v1.2.0-quickplay.2), so stealth players on that build leave no log trace here either.
 >
 > Build: see `build.sh` (requires the `skyline-v3` rustup toolchain; `cargo skyline update-std` equivalent setup).
 >

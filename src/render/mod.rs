@@ -34,10 +34,11 @@ impl Default for RenderConfig {
     }
 }
 
-/// When stealth mode is enabled, the mod stops broadcasting the local player's
-/// latency/render-profile packet to connected stations, so modded opponents see
-/// no extended info for us (we look like a vanilla player). We still receive
-/// and display extended info from modded opponents.
+/// When stealth mode is enabled, the mod never registers the custom-comms
+/// broadcast hook, so no packet carrying the local player's latency/render
+/// profile is ever sent to connected stations — opponents running any version
+/// of the mod see and log nothing, exactly as if we were a vanilla console.
+/// We still receive and display extended info from modded opponents.
 pub fn stealth_mode_enabled() -> bool {
     RENDER_CONFIG.load().stealth_mode
 }

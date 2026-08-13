@@ -140,15 +140,7 @@ fn on_station_connection_changed(
 }
 
 fn send_pia_data_hook(_station: ConnectedStation, data: &mut [u8]) {
-    // Stealth mode: never broadcast our latency/render profile. Zero the buffer
-    // so receivers deterministically reject the packet (version 0 is invalid),
-    // making us indistinguishable from a vanilla player. We still parse
-    // incoming packets in receive_pia_data_hook, so we keep seeing modded
-    // opponents' extended info.
-    if crate::render::stealth_mode_enabled() {
-        data.fill(0);
-        return;
-    }
+    // Only registered when stealth mode is off (see install()).
     let latency_bits = LatencySliderManager::instance()
         .active_latency()
         .unwrap_or_else(|| LatencySliderManager::instance().selected_latency())
@@ -167,6 +159,14 @@ fn send_pia_data_hook(_station: ConnectedStation, data: &mut [u8]) {
 }
 
 fn receive_pia_data_hook(station: ConnectedStation, data: &[u8]) {
+    // Version 0 is reserved: stealth-mode peers from v1.2.0-quickplay.2 zeroed
+    // their broadcast buffer instead of sending nothing. Treat it exactly like
+    // playing against a vanilla console: no extended info is recorded and
+    // nothing is logged, so a stealth player leaves no trace in either the
+    // overlay or the log.
+    if data.first() == Some(&0) {
+        return;
+    }
     let id = station.get_id();
     let stations_table = CONNECTED_STATION_TABLE_ATOMIC_VIEW.load();
     if let Some(station) = stations_table.iter().find(|s| s.id == id) {
@@ -198,7 +198,14 @@ pub(super) fn install() {
     StationConnectionManager::register_station_connection_changed_callback(
         on_station_connection_changed,
     );
-    StationConnectionManager::register_station_data_send_hook(send_pia_data_hook);
+    // Stealth mode: never register the send hook, so we do not participate in
+    // the custom-comms broadcast at all — no packet carrying our data is ever
+    // handed to ssbusync, for opponents running ANY version of the mod. The
+    // receive hook stays registered, so we still see modded opponents'
+    // extended info while appearing vanilla to them.
+    if !crate::render::stealth_mode_enabled() {
+        StationConnectionManager::register_station_data_send_hook(send_pia_data_hook);
+    }
     StationConnectionManager::register_station_data_received_hook(receive_pia_data_hook);
 
     #[cfg(feature = "dummy_connection")]
