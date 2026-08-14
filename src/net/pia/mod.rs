@@ -3,6 +3,8 @@ use std::sync::{
     Arc, LazyLock, Mutex,
 };
 
+pub mod manager_stealth;
+
 use arc_swap::ArcSwap;
 use zerocopy::{FromBytes, Immutable, IntoBytes, KnownLayout, Unaligned};
 
@@ -200,12 +202,17 @@ pub(super) fn install() {
     );
     // Stealth mode: never register the send hook, so we do not participate in
     // the custom-comms broadcast at all — no packet carrying our data is ever
-    // handed to ssbusync, for opponents running ANY version of the mod. The
-    // receive hook stays registered, so we still see modded opponents'
+    // handed to the pia manager, for opponents running ANY version of the mod.
+    // The receive hook stays registered, so we still see modded opponents'
     // extended info while appearing vanilla to them.
     if !crate::render::stealth_mode_enabled() {
         StationConnectionManager::register_station_data_send_hook(send_pia_data_hook);
     }
+    // The manager has its own lower-level beacon (a 0x45 tag + our interface
+    // type appended to PIA traffic) that powers is_modded and the
+    // "[Wired]"/"[Wifi]" suffix on OTHER consoles. It fires below our layer,
+    // so stealth also patches that tag out of the manager's text at runtime.
+    manager_stealth::arm();
     StationConnectionManager::register_station_data_received_hook(receive_pia_data_hook);
 
     #[cfg(feature = "dummy_connection")]
