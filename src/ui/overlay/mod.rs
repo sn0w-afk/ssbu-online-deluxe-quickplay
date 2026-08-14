@@ -571,6 +571,7 @@ unsafe fn draw_debug_table(first_col_width: f32) {
 unsafe extern "C" fn draw() {
     OVERLAY_POLLER.poll();
     crate::net::tick_scene_transition();
+    crate::net::pia::manager_stealth::tick();
     crate::net::enforce_ssbusync_arena_mark();
     crate::render::profile::maybe_reapply_match_profile();
     let input_snapshot = OVERLAY_POLLER.snapshot();
