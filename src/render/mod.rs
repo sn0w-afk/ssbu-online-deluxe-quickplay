@@ -22,6 +22,7 @@ pub struct RenderConfig {
     render_profile_config: RenderProfileConfig,
     overclocker: bool,
     stealth_mode: bool,
+    offline_mode: bool,
 }
 
 impl Default for RenderConfig {
@@ -30,6 +31,7 @@ impl Default for RenderConfig {
             render_profile_config: RenderProfileConfig::default(),
             overclocker: true,
             stealth_mode: false,
+            offline_mode: false,
         }
     }
 }
@@ -41,6 +43,15 @@ impl Default for RenderConfig {
 /// We still receive and display extended info from modded opponents.
 pub fn stealth_mode_enabled() -> bool {
     RENDER_CONFIG.load().stealth_mode
+}
+
+/// When offline mode is enabled, the render profile system also runs outside
+/// online play: offline matches/training use the configured `offline_match`
+/// profiles (or the manually cycled profile when auto mode is off), and the
+/// overlay shows/accepts render profile input offline. The latency slider
+/// stays online-only — it is meaningless without a network peer.
+pub fn offline_mode_enabled() -> bool {
+    RENDER_CONFIG.load().offline_mode
 }
 
 #[no_mangle]

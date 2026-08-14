@@ -564,11 +564,18 @@ pub(crate) fn match_init() {
                 &RenderProfileSettings::vanilla(),
             );
         }
+    } else if crate::render::offline_mode_enabled() {
+        // Offline mode opt-in: mirror the online path so the selected-profile
+        // state stays in sync (auto-selects the configured offline_match
+        // profile, or keeps the user's manually cycled profile when auto mode
+        // is off).
+        RenderProfileManager::instance()
+            .auto_select_profile(false, match_status == MatchStatus::Doubles);
+        RenderProfileManager::instance().apply_selected_profile_settings();
     } else {
-        let rp = RenderProfileManager::instance()
-            .recommended_render_profile(false, match_status == MatchStatus::Doubles);
-        let rps = RenderProfileSettings::from_render_profile(rp);
-        RenderProfileManager::apply_render_profile_settings_immediate(&rps);
+        RenderProfileManager::apply_render_profile_settings_immediate(
+            &RenderProfileSettings::vanilla(),
+        );
     }
 }
 
@@ -596,7 +603,9 @@ pub(crate) fn maybe_reapply_match_profile() {
     if crate::net::is_scene_transition_active() {
         return;
     }
-    if !crate::net::is_valid_online_mode() || !crate::net::is_in_real_game() {
+    let profile_mode_active =
+        crate::net::is_valid_online_mode() || crate::render::offline_mode_enabled();
+    if !profile_mode_active || !crate::net::is_in_real_game() {
         return;
     }
     let selected = RenderProfileManager::instance().selected_render_profile_settings();

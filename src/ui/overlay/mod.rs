@@ -185,7 +185,7 @@ unsafe fn begin_table_row(row_idx: usize, label: &str) {
 
 fn row_label_with_cursor(row_idx: usize, label: &str) -> String {
     let label = label.trim_end_matches('\0');
-    if SELECTED_TABLE_ROW.load(Ordering::SeqCst) == row_idx {
+    if SELECTED_TABLE_ROW.load(Ordering::SeqCst) == row_idx && is_row_configurable(row_idx) {
         format!("> {label}\0")
     } else {
         format!("{label}\0")
@@ -214,23 +214,32 @@ fn move_row_cursor(delta: isize) {
 }
 
 fn is_row_configurable(row: usize) -> bool {
-    matches!(row, ROW_NET_LATENCY | ROW_RENDER_PROFILE)
+    match row {
+        // Latency slider is meaningless without a network peer.
+        ROW_NET_LATENCY => is_valid_online_mode(),
+        ROW_RENDER_PROFILE => {
+            is_valid_online_mode() || crate::render::offline_mode_enabled()
+        }
+        _ => false,
+    }
 }
 
 fn poll_selected_setting(input_snapshot: &InputSnapshot) {
-    let allow_interact = is_valid_online_mode() && !is_in_valid_online_game();
-    if !allow_interact {
-        return;
-    }
+    let online_interact = is_valid_online_mode() && !is_in_valid_online_game();
+    // Offline mode opt-in: render profile cycling is allowed outside online
+    // play (still not mid-match), the latency slider stays online-only.
+    let offline_profile_interact = !is_valid_online_mode()
+        && crate::render::offline_mode_enabled()
+        && !crate::net::is_in_real_game();
     match SELECTED_TABLE_ROW.load(Ordering::SeqCst) {
-        ROW_NET_LATENCY => {
+        ROW_NET_LATENCY if online_interact => {
             LatencySliderManager::instance().poll(
                 input_snapshot,
                 ninput::Buttons::LEFT,
                 ninput::Buttons::RIGHT,
             );
         }
-        ROW_RENDER_PROFILE => {
+        ROW_RENDER_PROFILE if online_interact || offline_profile_interact => {
             RenderProfileManager::instance().poll(
                 input_snapshot,
                 ninput::Buttons::LEFT,
@@ -268,6 +277,7 @@ pub fn get_fixed_height(pos: f32, cur_disp_height: f32) -> f32 {
 
 unsafe fn draw_interact_table(first_col_width: f32) {
     let is_valid_online_mode = is_valid_online_mode();
+    let profile_ui_enabled = is_valid_online_mode || crate::render::offline_mode_enabled();
     let stations = StationConnectionManager::get_connected_stations();
     if !igBeginTable(
         IMGUI_TABLE_ID.as_ptr() as _,
@@ -350,7 +360,7 @@ unsafe fn draw_interact_table(first_col_width: f32) {
         ROW_RENDER_PROFILE,
         IMGUI_INTERACT_TABLE_ROW_NAME_STRS[ROW_RENDER_PROFILE],
     );
-    if is_valid_online_mode {
+    if profile_ui_enabled {
         let rp = match is_in_valid_online_game() {
             true => RenderProfileManager::active_render_profile(),
             false => RenderProfileManager::instance().selected_render_profile(),

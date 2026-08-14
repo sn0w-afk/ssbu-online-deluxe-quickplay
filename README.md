@@ -166,6 +166,7 @@ See 'Features' section below to see what these options do
 - Show **extended opponent info** *(only if both players have the mod)*:
   - Opponent’s current network/render settings (latency slider, render profile)
 - 🥷 **Stealth mode** *(fork only)*: never broadcast your extended info — opponents on any mod version see and log nothing, as if you were vanilla — while you can still see theirs. Enabled via `stealth_mode = true` in `config.toml` (on by default in the bundled config).
+- 📴 **Offline mode** *(fork only)*: opt in to render profiles outside online play — offline matches/training use your `offline_match` config profiles (or your manually cycled profile), and the overlay shows/cycles the NetProfile row offline. The latency slider stays online-only. Enabled via `offline_mode = true` in `config.toml` (off by default; with it off, offline play is forced to Vanilla).
 
 ### 🎛️ Online Latency Controls
 *(Available in Online Arena, Quickplay, and Local Online modes)*
@@ -224,16 +225,18 @@ You can specify a config file in `sd/ultimate/ssbu_online_deluxe/config.toml`
   - Restart switch
 - All fields are optional. If you dont specify a field, it will use the default/recommended value.
 - **Stealth mode**: `stealth_mode` controls the "extended opponent info" broadcast. When `true`, the mod never broadcasts your latency/render-profile info — opponents running any version of the mod see nothing in their overlay and nothing in their log, exactly as if you were a vanilla console — while you can still see *their* extended info. It also suppresses the lower-level mod-detection beacon inside `libssbu_pia_manager.nro` (the `0x45` tag that powers `is_modded` and the `[Wired]`/`[Wifi]` suffix on opponents' screens), so a stealth console shows no interface suffix at all, same as vanilla. The `config.toml` bundled with this fork's releases ships with `stealth_mode = true`. Set it to `false` if you want two-way extended info sharing. (Code default when the key is absent: `false`.)
+- **Offline mode** *(fork only)*: `offline_mode` lets the render profile system run outside online play. When `true`, offline matches and training use your configured `offline_match` profiles (auto mode) or your manually cycled profile, and the overlay shows + accepts render profile input offline. The latency slider stays online-only — it has no effect without a network peer. When `false` (default), offline play is forced to Vanilla, exactly as before.
 
 Example `config.toml`:
 ```
 overclocker = true                          # Set to 'false' if you are using your own overclock sysmodule
 stealth_mode = true                         # 'true' = never broadcast extended info; 'false' = share with modded opponents
+offline_mode = false                        # 'true' = render profiles also apply in offline matches/training
 
 [render_profile_config]
 menu = "Vanilla"                            # Recommended to keep this on Vanilla always
-offline_match.singles = "Vanilla"           # Applies to offline single matches (1 or 2 players)
-offline_match.doubles = "Vanilla"           # Applies to offline doubles matches (more than 2 players)
+offline_match.singles = "Vanilla"           # Applies to offline single matches (1 or 2 players) when offline_mode = true
+offline_match.doubles = "Vanilla"           # Applies to offline doubles matches (more than 2 players) when offline_mode = true
 online_match.singles = "LessLagUltra++"     # 'Auto' mode will choose this profile for online single matches
 online_match.doubles = "LessLag"            # 'Auto' mode will choose this profile for online double matches
 ```
