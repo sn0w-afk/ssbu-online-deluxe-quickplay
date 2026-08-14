@@ -40,8 +40,23 @@ extern "C" {
     #[link_name = "\u{1}_ZN3app9smashball16is_training_modeEv"]
     fn is_training_mode() -> bool;
 
+    #[link_name = "\u{1}_ZN3app9smashball10is_loadingEv"]
+    fn is_loading() -> bool;
+
     #[link_name = "\u{1}_ZN3app7fighter23get_fighter_entry_countEv"]
     fn get_fighter_entry_count() -> i32;
+}
+
+/// True while the game is on a loading screen / mid scene transition.
+///
+/// Crash-report analysis (10 reports) showed the dominant failure is an nnSdk
+/// assertion on a networking-adjacent system thread that fires during scene
+/// transitions (quickplay -> CSS on no-rematch, arena CSS reloads). Anything
+/// that pokes network/render state during that window is a suspect, so
+/// per-frame actors must be gated on this.
+#[inline]
+pub fn is_scene_transition_active() -> bool {
+    unsafe { is_loading() }
 }
 
 #[skyline::hook(offset = 0x235a650, inline)]
@@ -130,10 +145,23 @@ unsafe fn css_player_pane_num_changed(param_1: i64, prev_num: i32, changed_by_pl
 
 #[skyline::hook(offset = 0x1a12f60)]
 unsafe fn update_css(arg: u64) {
-    if is_valid_online_mode() {
-        let banner_pane1_ptr =
-            (*((*((arg + 0xe58) as *const u64) + 0x10) as *const u64)) as *mut Pane;
-        crate::ui::native::update_css_ui(banner_pane1_ptr);
+    // The banner pane chain is walked without the game guaranteeing the nodes
+    // exist yet — during CSS loads (arena character switches, quickplay
+    // no-rematch returns) the intermediate pointers can be null or the layout
+    // half-built. Skip entirely while a transition is active, and null-check
+    // every link regardless: a missed UI frame is cheap, a Data Abort is not.
+    if is_valid_online_mode() && !is_scene_transition_active() {
+        // Original chain: pane = *( *((arg+0xe58) as u64*) + 0x10 ) as Pane*
+        let l1 = *((arg + 0xe58) as *const u64);
+        let l2 = if l1 == 0 {
+            0
+        } else {
+            *((l1 + 0x10) as *const u64)
+        };
+        let banner_pane1_ptr = l2 as *mut Pane;
+        if !banner_pane1_ptr.is_null() {
+            crate::ui::native::update_css_ui(banner_pane1_ptr);
+        }
     }
     call_original!(arg);
 }
@@ -270,7 +298,15 @@ pub fn mark_arena_mode_for_ssbusync_throttled() {
 /// apply: while the quickplay scene is being tracked, or while a pia
 /// connection exists (covers background matchmaking, where the tracked
 /// connection status may have been reset by passing through the main menu).
+///
+/// Skipped during scene transitions: ssbusync clears its mode flags on every
+/// transition anyway, and calling into it while the session/render state is
+/// mid-teardown is the prime suspect for the nnSdk assertion crashes seen on
+/// loading screens (see crash report analysis).
 pub fn enforce_ssbusync_arena_mark() {
+    if is_scene_transition_active() {
+        return;
+    }
     if is_online_quickplay_mode() || is_connected() {
         mark_arena_mode_for_ssbusync_throttled();
     }

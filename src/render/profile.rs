@@ -590,6 +590,12 @@ pub(crate) fn match_cleanup() {
 /// case the flags still get reset (e.g. right at match start, after
 /// `match_init` applied the selected profile at stage presetup).
 pub(crate) fn maybe_reapply_match_profile() {
+    // Skipped during scene transitions: writing render env flags while the
+    // renderer is mid-teardown/rebuild (e.g. VS-screen loads) is a crash
+    // suspect — ssbusync drops/resets flags during transitions anyway.
+    if crate::net::is_scene_transition_active() {
+        return;
+    }
     if !crate::net::is_valid_online_mode() || !crate::net::is_in_real_game() {
         return;
     }
