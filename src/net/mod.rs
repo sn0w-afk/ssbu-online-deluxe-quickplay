@@ -44,8 +44,43 @@ extern "C" {
     fn get_fighter_entry_count() -> i32;
 }
 
+/// Self-tracked scene transition detection.
+///
+/// Crash-report analysis (10 reports) showed the dominant failure is an nnSdk
+/// assertion on a networking-adjacent system thread that fires during scene
+/// transitions (quickplay -> CSS on no-rematch, arena CSS reloads). Anything
+/// that pokes network/render state during that window is a suspect, so
+/// per-frame actors must be gated while a transition is in progress.
+///
+/// The game exposes no reliable public "is loading" symbol (the first attempt
+/// linked app::smashball::is_loading, which does not resolve in SSBU 13.0.x
+/// and crashed on startup), so instead every scene-init / stage-load hook we
+/// already own starts a frame-count grace period, and the overlay draw loop
+/// ticks it down. 300 frames (~5s at 60fps) comfortably covers SSBU's loads.
+const TRANSITION_GRACE_FRAME_COUNT: u64 = 300;
+static TRANSITION_GRACE_FRAMES: AtomicU64 = AtomicU64::new(TRANSITION_GRACE_FRAME_COUNT);
+
+/// Called from scene-init and stage-load hooks: a transition is starting.
+pub fn note_scene_transition() {
+    TRANSITION_GRACE_FRAMES.store(TRANSITION_GRACE_FRAME_COUNT, Ordering::SeqCst);
+}
+
+/// Called once per frame from the overlay draw loop.
+pub fn tick_scene_transition() {
+    let frames = TRANSITION_GRACE_FRAMES.load(Ordering::SeqCst);
+    if frames > 0 {
+        TRANSITION_GRACE_FRAMES.store(frames - 1, Ordering::SeqCst);
+    }
+}
+
+#[inline]
+pub fn is_scene_transition_active() -> bool {
+    TRANSITION_GRACE_FRAMES.load(Ordering::SeqCst) > 0
+}
+
 #[skyline::hook(offset = 0x235a650, inline)]
 unsafe fn main_menu_init(_: &InlineCtx) {
+    note_scene_transition();
     LOCAL_ROOM_PANE_HANDLE.store(0, Ordering::SeqCst);
     ONLINE_ARENA_PANE_HANDLE.store(0, Ordering::SeqCst);
     MATCH_CONNECTION_STATUS.store(MatchConnectionStatus::Offline as u8, Ordering::SeqCst);
@@ -54,6 +89,7 @@ unsafe fn main_menu_init(_: &InlineCtx) {
 
 #[skyline::hook(offset = 0x22d9d10, inline)]
 unsafe fn online_melee_any_init(_: &InlineCtx) {
+    note_scene_transition();
     LOCAL_ROOM_PANE_HANDLE.store(0, Ordering::SeqCst);
     ONLINE_ARENA_PANE_HANDLE.store(0, Ordering::SeqCst);
     MATCH_CONNECTION_STATUS.store(MatchConnectionStatus::OnlineQuickplay as u8, Ordering::SeqCst);
@@ -63,6 +99,7 @@ unsafe fn online_melee_any_init(_: &InlineCtx) {
 
 #[skyline::hook(offset = 0x22d9c40, inline)]
 unsafe fn online_bg_matchmaking_init(_: &InlineCtx) {
+    note_scene_transition();
     LOCAL_ROOM_PANE_HANDLE.store(0, Ordering::SeqCst);
     ONLINE_ARENA_PANE_HANDLE.store(0, Ordering::SeqCst);
     MATCH_CONNECTION_STATUS.store(MatchConnectionStatus::OnlineQuickplay as u8, Ordering::SeqCst);
@@ -72,6 +109,7 @@ unsafe fn online_bg_matchmaking_init(_: &InlineCtx) {
 
 #[skyline::hook(offset = 0x22d9b50, inline)]
 unsafe fn online_arena_menu_init(_: &InlineCtx) {
+    note_scene_transition();
     MATCH_CONNECTION_STATUS.store(MatchConnectionStatus::OnlineArena as u8, Ordering::SeqCst);
 }
 
@@ -85,6 +123,7 @@ unsafe fn online_arena_room_update(_: &skyline::hooks::InlineCtx) {
 
 #[skyline::hook(offset = 0x1887b1c, inline)]
 unsafe fn online_arena_room_init(ctx: &skyline::hooks::InlineCtx) {
+    note_scene_transition();
     let panel = *((*((ctx.registers[0].x() + 8) as *const u64) + 0x10) as *const u64);
     ONLINE_ARENA_PANE_HANDLE.store(panel, Ordering::SeqCst);
     CURRENT_ARENA_ID = String::from_utf16(std::slice::from_raw_parts(
@@ -98,6 +137,7 @@ unsafe fn online_arena_room_init(ctx: &skyline::hooks::InlineCtx) {
 // called on local online menu init
 #[skyline::hook(offset = 0x1bd45e0, inline)]
 unsafe fn online_local_menu_init(ctx: &InlineCtx) {
+    note_scene_transition();
     println!("LOCAL ONLINE INIT");
     LOCAL_ONLINE_CSS_NUM_PANES_ADJUSTED = false;
     let handle = *((*((ctx.registers[0].x() + 8) as *const u64) + 0x10) as *const u64);
@@ -130,10 +170,23 @@ unsafe fn css_player_pane_num_changed(param_1: i64, prev_num: i32, changed_by_pl
 
 #[skyline::hook(offset = 0x1a12f60)]
 unsafe fn update_css(arg: u64) {
-    if is_valid_online_mode() {
-        let banner_pane1_ptr =
-            (*((*((arg + 0xe58) as *const u64) + 0x10) as *const u64)) as *mut Pane;
-        crate::ui::native::update_css_ui(banner_pane1_ptr);
+    // The banner pane chain is walked without the game guaranteeing the nodes
+    // exist yet — during CSS loads (arena character switches, quickplay
+    // no-rematch returns) the intermediate pointers can be null or the layout
+    // half-built. Skip entirely while a transition is active, and null-check
+    // every link regardless: a missed UI frame is cheap, a Data Abort is not.
+    if is_valid_online_mode() && !is_scene_transition_active() {
+        // Original chain: pane = *( *((arg+0xe58) as u64*) + 0x10 ) as Pane*
+        let l1 = *((arg + 0xe58) as *const u64);
+        let l2 = if l1 == 0 {
+            0
+        } else {
+            *((l1 + 0x10) as *const u64)
+        };
+        let banner_pane1_ptr = l2 as *mut Pane;
+        if !banner_pane1_ptr.is_null() {
+            crate::ui::native::update_css_ui(banner_pane1_ptr);
+        }
     }
     call_original!(arg);
 }
@@ -270,7 +323,15 @@ pub fn mark_arena_mode_for_ssbusync_throttled() {
 /// apply: while the quickplay scene is being tracked, or while a pia
 /// connection exists (covers background matchmaking, where the tracked
 /// connection status may have been reset by passing through the main menu).
+///
+/// Skipped during scene transitions: ssbusync clears its mode flags on every
+/// transition anyway, and calling into it while the session/render state is
+/// mid-teardown is the prime suspect for the nnSdk assertion crashes seen on
+/// loading screens (see crash report analysis).
 pub fn enforce_ssbusync_arena_mark() {
+    if is_scene_transition_active() {
+        return;
+    }
     if is_online_quickplay_mode() || is_connected() {
         mark_arena_mode_for_ssbusync_throttled();
     }
@@ -283,6 +344,7 @@ pub fn is_in_valid_online_game() -> bool {
 
 #[skyline::hook(offset = 0x25d8e38, inline)]
 unsafe fn on_stage_presetup(ctx: &InlineCtx) {
+    note_scene_transition();
     let stage_base = ctx.registers[0].x();
     let stage_id = *((stage_base + 8) as *mut u32);
 
