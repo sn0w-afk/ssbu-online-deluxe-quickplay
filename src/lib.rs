@@ -8,6 +8,7 @@ mod input_poll;
 mod net;
 mod perf_scaler;
 mod render;
+mod session_log;
 mod ui;
 mod utils;
 
@@ -51,4 +52,9 @@ pub fn main() {
     net::install();
     ui::install();
     perf_scaler::install();
+
+    // Forensic heartbeat — runs last so the BOOT line reflects the final
+    // loaded config. Used to correlate crash reports against actual
+    // per-session plugin presence.
+    session_log::init();
 }
