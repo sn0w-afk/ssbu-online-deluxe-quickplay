@@ -22,6 +22,7 @@ pub struct RenderConfig {
     render_profile_config: RenderProfileConfig,
     overclocker: bool,
     stealth_mode: bool,
+    lurk_mode: bool,
     offline_mode: bool,
 }
 
@@ -31,18 +32,30 @@ impl Default for RenderConfig {
             render_profile_config: RenderProfileConfig::default(),
             overclocker: true,
             stealth_mode: false,
+            lurk_mode: false,
             offline_mode: false,
         }
     }
 }
 
-/// When stealth mode is enabled, the mod never registers the custom-comms
-/// broadcast hook, so no packet carrying the local player's latency/render
-/// profile is ever sent to connected stations — opponents running any version
-/// of the mod see and log nothing, exactly as if we were a vanilla console.
-/// We still receive and display extended info from modded opponents.
+/// When stealth mode is enabled ("Ghost"), the mod never registers the
+/// custom-comms broadcast hook AND the pia manager's `0x45` beacon is patched
+/// out, so we are indistinguishable from a vanilla console at every level we
+/// control. The trade-off is structural: the beacon is also the capability
+/// token peers use to decide whether to answer our extended-info requests, so
+/// a stealth console is blind — it cannot see opponents' extended info either.
 pub fn stealth_mode_enabled() -> bool {
     RENDER_CONFIG.load().stealth_mode
+}
+
+/// When lurk mode is enabled, the mod never registers the custom-comms
+/// broadcast hook, so our latency/render profile is never sent — but unlike
+/// stealth mode the manager's `0x45` beacon is left intact, so we remain a
+/// "capable" station and keep receiving modded opponents' extended info.
+/// Trade-off: opponents running any manager version can see that we are
+/// modded and whether we are on `[Wired]`/`[Wifi]`.
+pub fn lurk_mode_enabled() -> bool {
+    RENDER_CONFIG.load().lurk_mode
 }
 
 /// When offline mode is enabled, the render profile system also runs outside

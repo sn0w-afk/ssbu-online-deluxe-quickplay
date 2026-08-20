@@ -1,6 +1,6 @@
 [package]
 name = "ssbu-online-deluxe"
-version = "1.4.0-dev.2"
+version = "1.4.0-dev.3"
 authors = ["saad-script"]
 edition = "2021"
 

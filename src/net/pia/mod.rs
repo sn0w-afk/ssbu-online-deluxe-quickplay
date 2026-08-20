@@ -203,7 +203,8 @@ fn on_station_connection_changed(
 }
 
 fn send_pia_data_hook(_station: ConnectedStation, data: &mut [u8]) {
-    // Only registered when stealth mode is off (see install()).
+    // Only registered when both stealth mode and lurk mode are off
+    // (see install()).
     let latency_bits = LatencySliderManager::instance()
         .active_latency()
         .unwrap_or_else(|| LatencySliderManager::instance().selected_latency())
@@ -261,18 +262,23 @@ pub(super) fn install() {
     StationConnectionManager::register_station_connection_changed_callback(
         on_station_connection_changed,
     );
-    // Stealth mode: never register the send hook, so we do not participate in
-    // the custom-comms broadcast at all — no packet carrying our data is ever
-    // handed to the pia manager, for opponents running ANY version of the mod.
-    // The receive hook stays registered, so we still see modded opponents'
-    // extended info while appearing vanilla to them.
-    if !crate::render::stealth_mode_enabled() {
+    // Broadcast gating, two knobs:
+    // - stealth_mode ("Ghost"): no send hook AND the manager's 0x45 beacon is
+    //   patched out (manager_stealth). Vanilla-indistinguishable, but blind:
+    //   the beacon doubles as the capability token, so peers' managers refuse
+    //   to answer our extended-info requests.
+    // - lurk_mode ("Lurker"): no send hook, but the beacon flows. We broadcast
+    //   no latency/render data, yet stay a "capable" station, so we keep
+    //   receiving modded opponents' extended info. Peers can still see that
+    //   we're modded and our [Wired]/[Wifi] interface type.
+    if !crate::render::stealth_mode_enabled() && !crate::render::lurk_mode_enabled() {
         StationConnectionManager::register_station_data_send_hook(send_pia_data_hook);
     }
     // The manager has its own lower-level beacon (a 0x45 tag + our interface
     // type appended to PIA traffic) that powers is_modded and the
     // "[Wired]"/"[Wifi]" suffix on OTHER consoles. It fires below our layer,
     // so stealth also patches that tag out of the manager's text at runtime.
+    // (arm() is a no-op unless stealth_mode is on; lurk mode keeps the beacon.)
     manager_stealth::arm();
     StationConnectionManager::register_station_data_received_hook(receive_pia_data_hook);
 

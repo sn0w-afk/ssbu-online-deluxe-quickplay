@@ -31,10 +31,11 @@ fn append(line: &str) {
 
 pub fn init() {
     append(&format!(
-        "BOOT epoch={} version={} stealth={} offline_mode={}",
+        "BOOT epoch={} version={} stealth={} lurk={} offline_mode={}",
         now_secs(),
         env!("CARGO_PKG_VERSION"),
         crate::render::stealth_mode_enabled(),
+        crate::render::lurk_mode_enabled(),
         crate::render::offline_mode_enabled(),
     ));
 
