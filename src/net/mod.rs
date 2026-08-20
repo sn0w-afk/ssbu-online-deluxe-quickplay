@@ -78,6 +78,67 @@ pub fn is_scene_transition_active() -> bool {
     TRANSITION_GRACE_FRAMES.load(Ordering::SeqCst) > 0
 }
 
+/// Connection disturbances ride the same grace window as scene transitions.
+///
+/// Crash report 01787247875 showed why: in quickplay no-rematch, the NEX
+/// session teardown trails the CSS load by ~10 seconds — the assert fired 3s
+/// after the pia disconnect and 13s after the transition grace had expired.
+/// Gating only on scene transitions leaves the teardown window uncovered, so
+/// every station connect/disconnect restarts the grace period as well.
+pub fn note_connection_disturbance() {
+    note_scene_transition();
+}
+
+const PENDING_MATCH_NONE: u8 = 0;
+const PENDING_MATCH_INIT: u8 = 1;
+const PENDING_MATCH_CLEANUP: u8 = 2;
+static PENDING_MATCH_APPLY: AtomicU8 = AtomicU8::new(PENDING_MATCH_NONE);
+static PENDING_ARENA_MARK: AtomicU8 = AtomicU8::new(0);
+
+/// Defers the render/perf profile swap out of scene hooks.
+///
+/// `match_init`/`match_cleanup` write render env flags via sync_guest and poke
+/// the OC sysmodule — exactly the kind of work that must not run while a scene
+/// load or session teardown is in flight. Scene hooks now only record which
+/// apply is pending; the swap executes from `process_deferred_net_work` once
+/// the transition/disturbance grace has fully expired. The existing
+/// `maybe_reapply_match_profile` drift check remains as the safety net.
+fn request_match_apply(pending: u8) {
+    PENDING_MATCH_APPLY.store(pending, Ordering::SeqCst);
+}
+
+/// Marks the session for ssbusync after the grace window instead of inside a
+/// scene-init hook. ssbusync clears its mode flags on every transition anyway,
+/// so marking mid-transition is both wasted and risky.
+fn request_arena_mark() {
+    PENDING_ARENA_MARK.store(1, Ordering::SeqCst);
+}
+
+/// Runs once per frame from the overlay draw loop. Executes every piece of
+/// deferred network/render work — but only after the transition/disturbance
+/// grace window has fully closed, so nothing we do can interleave with scene
+/// loads or NEX session teardown.
+pub fn process_deferred_net_work() {
+    if is_scene_transition_active() {
+        return;
+    }
+    if PENDING_ARENA_MARK.swap(0, Ordering::SeqCst) != 0 {
+        mark_arena_mode_for_ssbusync();
+    }
+    pia::process_pending_connection_events();
+    match PENDING_MATCH_APPLY.swap(PENDING_MATCH_NONE, Ordering::SeqCst) {
+        PENDING_MATCH_INIT => {
+            crate::render::profile::match_init();
+            crate::perf_scaler::match_init();
+        }
+        PENDING_MATCH_CLEANUP => {
+            crate::perf_scaler::match_cleanup();
+            crate::render::profile::match_cleanup();
+        }
+        _ => {}
+    }
+}
+
 #[skyline::hook(offset = 0x235a650, inline)]
 unsafe fn main_menu_init(_: &InlineCtx) {
     note_scene_transition();
@@ -94,7 +155,7 @@ unsafe fn online_melee_any_init(_: &InlineCtx) {
     ONLINE_ARENA_PANE_HANDLE.store(0, Ordering::SeqCst);
     MATCH_CONNECTION_STATUS.store(MatchConnectionStatus::OnlineQuickplay as u8, Ordering::SeqCst);
     update_match_status(MatchStatus::Inactive, false);
-    mark_arena_mode_for_ssbusync();
+    request_arena_mark();
 }
 
 #[skyline::hook(offset = 0x22d9c40, inline)]
@@ -104,7 +165,7 @@ unsafe fn online_bg_matchmaking_init(_: &InlineCtx) {
     ONLINE_ARENA_PANE_HANDLE.store(0, Ordering::SeqCst);
     MATCH_CONNECTION_STATUS.store(MatchConnectionStatus::OnlineQuickplay as u8, Ordering::SeqCst);
     update_match_status(MatchStatus::Inactive, false);
-    mark_arena_mode_for_ssbusync();
+    request_arena_mark();
 }
 
 #[skyline::hook(offset = 0x22d9b50, inline)]
@@ -209,12 +270,12 @@ fn update_match_status(match_status: MatchStatus, force_update: bool) {
     if prev != match_status as u8 || force_update {
         println!("UPDATE MATCH STATUS: {:?}", match_status);
         if match_status != MatchStatus::Inactive {
-            crate::render::profile::match_init();
-            crate::perf_scaler::match_init();
+            // Deferred: env-flag writes and OC sysmodule pokes must not run
+            // inside this scene hook (fires mid-load via on_stage_presetup).
+            request_match_apply(PENDING_MATCH_INIT);
         } else {
             latency_slider::match_cleanup();
-            crate::perf_scaler::match_cleanup();
-            crate::render::profile::match_cleanup();
+            request_match_apply(PENDING_MATCH_CLEANUP);
         }
     }
 }

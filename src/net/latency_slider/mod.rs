@@ -153,7 +153,9 @@ unsafe fn set_online_latency(ctx: &InlineCtx) {
     println!("SET ONLINE LATENCY");
     // A networked match is about to start; make sure ssbusync does not apply
     // its quickplay restriction (forcing the vanilla runtime) for this match.
-    crate::net::mark_arena_mode_for_ssbusync();
+    // Deferred: this hook fires at match setup, i.e. mid-transition — the mark
+    // is applied once the transition grace window closes.
+    super::request_arena_mark();
     let auto = *(ctx.registers[19].x() as *mut u8);
     LAST_AUTO.store(auto as i8, Ordering::SeqCst);
     let buffer = LatencySliderManager::instance()

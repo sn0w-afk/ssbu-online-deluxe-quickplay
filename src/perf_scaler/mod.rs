@@ -37,6 +37,32 @@ pub(in crate::perf_scaler) fn pop_dynamic_res_report() {
     sync_guest::pop_dynamic_res_report(target_res);
 }
 
+static PENDING_DRS_POP: AtomicU8 = AtomicU8::new(0);
+
+/// Gated variant of `pop_dynamic_res_report` for the critical-hit DRS path.
+/// A finishing move's slow-mo can end right as the match -> results-stage
+/// transition begins, so popping during the grace window would call into
+/// ssbusync mid-load. The pop is deferred and drained once the window closes;
+/// push/pop stay balanced either way.
+pub(in crate::perf_scaler) fn pop_dynamic_res_report_gated() {
+    if crate::net::is_scene_transition_active() {
+        PENDING_DRS_POP.fetch_add(1, Ordering::SeqCst);
+    } else {
+        pop_dynamic_res_report();
+    }
+}
+
+/// Drains deferred DRS pops. Called once per frame from the overlay draw loop.
+pub(crate) fn process_deferred_drs_pop() {
+    if crate::net::is_scene_transition_active() {
+        return;
+    }
+    while PENDING_DRS_POP.load(Ordering::SeqCst) > 0 {
+        PENDING_DRS_POP.fetch_sub(1, Ordering::SeqCst);
+        pop_dynamic_res_report();
+    }
+}
+
 pub(crate) fn match_init() {
     sync_guest::clear_all_dynamic_res_report();
     let rps = RenderProfileManager::active_render_profile_settings();
@@ -47,6 +73,9 @@ pub(crate) fn match_init() {
 }
 
 pub(crate) fn match_cleanup() {
+    // clear_all resets ssbusync's report stack, so any deferred pops are moot
+    // and must be dropped to keep push/pop balanced.
+    PENDING_DRS_POP.store(0, Ordering::SeqCst);
     sync_guest::clear_all_dynamic_res_report();
 }
 

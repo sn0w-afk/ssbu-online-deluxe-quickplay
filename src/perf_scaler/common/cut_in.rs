@@ -12,7 +12,7 @@ use smashline::{
 };
 
 use crate::perf_scaler::{
-    pop_dynamic_res_report, push_dynamic_res_report, utils::is_valid_fighter_entry_id,
+    pop_dynamic_res_report_gated, push_dynamic_res_report, utils::is_valid_fighter_entry_id,
 };
 
 const CRITICAL_HIT_FINISH_COOLDOWN_FRAMES: i8 = 7;
@@ -56,7 +56,7 @@ unsafe extern "C" fn global_critical_hit_fighter_frame(fighter: &mut L2CFighterC
             cooldown_frames_left
         );
         if cooldown_frames_left <= 0 {
-            pop_dynamic_res_report();
+            pop_dynamic_res_report_gated();
             CRITICAL_HIT_ACTIVE[entry_id as usize].store(false, Ordering::SeqCst);
             println!(
                 "[CRITICAL_HIT_DRS] intensive_frame_end entry_id={}",

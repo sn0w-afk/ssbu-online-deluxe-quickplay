@@ -11,7 +11,7 @@ use crate::{
 use imgui_api::bindings::*;
 use ssbu_pia_interface::{NetworkInterfaceType, NetworkStability, StationConnectionManager};
 use std::fmt::Display;
-use std::sync::atomic::{AtomicUsize, Ordering};
+use std::sync::atomic::{AtomicU64, AtomicUsize, Ordering};
 use ultelier::sync_guest::{self, BufferMode, IndexMode, ResolutionLevel};
 
 static IMGUI_EMPTY_CELL_STR: &str = "---\0";
@@ -251,8 +251,22 @@ fn poll_selected_setting(input_snapshot: &InputSnapshot) {
 }
 
 fn get_apparent_game_resolution() -> (u32, u32) {
+    // sync_guest reads are skipped during transition/disturbance grace: the
+    // overlay keeps showing the last known resolution instead of calling into
+    // ssbusync while a scene load or session teardown is in flight.
+    static LAST_RESOLUTION: AtomicU64 = AtomicU64::new((1920u64 << 32) | 1080);
+    if crate::net::is_scene_transition_active() {
+        let packed = LAST_RESOLUTION.load(Ordering::SeqCst);
+        return ((packed >> 32) as u32, packed as u32);
+    }
     match sync_guest::apparent_game_resolution() {
-        Some(res) => (res.width, res.height),
+        Some(res) => {
+            LAST_RESOLUTION.store(
+                ((res.width as u64) << 32) | res.height as u64,
+                Ordering::SeqCst,
+            );
+            (res.width, res.height)
+        }
         None => (1920, 1080),
     }
 }
@@ -394,6 +408,12 @@ unsafe fn draw_performance_table(
     show_avg_overall_ping: bool,
     avg_overall_ping_ms: Option<u64>,
 ) {
+    // Grace window: skip all ssbusync reads while a scene load or session
+    // teardown is in flight — the table shows a placeholder instead.
+    if crate::net::is_scene_transition_active() {
+        igText("settling (transition grace)\0".as_ptr() as _);
+        return;
+    }
     if igBeginTable(
         IMGUI_FPS_TABLE_ID.as_ptr() as _,
         2,
@@ -488,6 +508,12 @@ unsafe fn draw_performance_table(
 }
 
 unsafe fn draw_debug_table(first_col_width: f32) {
+    // Grace window: skip all ssbusync reads while a scene load or session
+    // teardown is in flight — the table shows a placeholder instead.
+    if crate::net::is_scene_transition_active() {
+        unsafe { igText("settling (transition grace)\0".as_ptr() as _) };
+        return;
+    }
     if !igBeginTable(
         IMGUI_DEBUG_TABLE_ID.as_ptr() as _,
         2,
@@ -582,6 +608,8 @@ unsafe extern "C" fn draw() {
     OVERLAY_POLLER.poll();
     crate::net::tick_scene_transition();
     crate::net::pia::manager_stealth::tick();
+    crate::net::process_deferred_net_work();
+    crate::perf_scaler::process_deferred_drs_pop();
     crate::net::enforce_ssbusync_arena_mark();
     crate::render::profile::maybe_reapply_match_profile();
     let input_snapshot = OVERLAY_POLLER.snapshot();

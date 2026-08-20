@@ -1,5 +1,5 @@
 use std::sync::{
-    atomic::{AtomicBool, AtomicU16, AtomicU8, Ordering},
+    atomic::{AtomicBool, AtomicU16, AtomicU64, AtomicU8, AtomicUsize, Ordering},
     Arc, LazyLock, Mutex,
 };
 
@@ -113,32 +113,93 @@ fn normalize_and_parse_data(data: &[u8]) -> Result<PiaCustomNetPacket, PiaCommsE
     return Err(PiaCommsError::VersionMismatch);
 }
 
+// Lock-free SPSC ring for connection events. The manager fires
+// on_station_connection_changed on its own thread — including mid
+// session-teardown, where crash report 01787247875 shows the NEX assert
+// lands. The callback therefore only reads the station id and queues the
+// event; all table/profile work runs later on the render thread, after the
+// disturbance grace window closes (see net::process_deferred_net_work).
+const CONN_EVENT_RING_SIZE: usize = 16;
+const CONN_EVENT_RING_MASK: usize = CONN_EVENT_RING_SIZE - 1;
+static CONN_EVENT_ID: [AtomicU64; CONN_EVENT_RING_SIZE] =
+    [const { AtomicU64::new(0) }; CONN_EVENT_RING_SIZE];
+static CONN_EVENT_META: [AtomicU64; CONN_EVENT_RING_SIZE] =
+    [const { AtomicU64::new(0) }; CONN_EVENT_RING_SIZE];
+static CONN_EVENT_HEAD: AtomicUsize = AtomicUsize::new(0); // next write (producer)
+static CONN_EVENT_TAIL: AtomicUsize = AtomicUsize::new(0); // next read (consumer)
+
+fn push_conn_event(id: u64, event: ConnectionChangedEvent, num_connected: usize) {
+    let head = CONN_EVENT_HEAD.load(Ordering::Acquire);
+    let tail = CONN_EVENT_TAIL.load(Ordering::Acquire);
+    if head.wrapping_sub(tail) >= CONN_EVENT_RING_SIZE {
+        // Ring full: drop the oldest event rather than the new one — a lost
+        // disconnect would leak a stale station into the table forever.
+        CONN_EVENT_TAIL.store(tail.wrapping_add(1), Ordering::Release);
+    }
+    let slot = head & CONN_EVENT_RING_MASK;
+    let meta = (event as u64) | ((num_connected as u64) << 8);
+    CONN_EVENT_ID[slot].store(id, Ordering::Relaxed);
+    CONN_EVENT_META[slot].store(meta, Ordering::Release);
+    CONN_EVENT_HEAD.store(head.wrapping_add(1), Ordering::Release);
+}
+
+fn pop_conn_event() -> Option<(u64, ConnectionChangedEvent, usize)> {
+    let tail = CONN_EVENT_TAIL.load(Ordering::Acquire);
+    let head = CONN_EVENT_HEAD.load(Ordering::Acquire);
+    if tail == head {
+        return None;
+    }
+    let slot = tail & CONN_EVENT_RING_MASK;
+    let meta = CONN_EVENT_META[slot].load(Ordering::Acquire);
+    let id = CONN_EVENT_ID[slot].load(Ordering::Relaxed);
+    CONN_EVENT_TAIL.store(tail.wrapping_add(1), Ordering::Release);
+    let event = if meta & 0xff == ConnectionChangedEvent::StationConnected as u64 {
+        ConnectionChangedEvent::StationConnected
+    } else {
+        ConnectionChangedEvent::StationDisconnected
+    };
+    Some((id, event, (meta >> 8) as usize))
+}
+
+/// Drains queued connection events on the render thread. Called once per frame
+/// from net::process_deferred_net_work, which itself only runs after the
+/// transition/disturbance grace window has closed.
+pub(super) fn process_pending_connection_events() {
+    while let Some((id, event, new_num_connected)) = pop_conn_event() {
+        let mut stations_table = CONNECTED_STATION_TABLE_SYNCED_INTERNAL.lock().unwrap();
+        if event == ConnectionChangedEvent::StationConnected {
+            stations_table.push(StationNetInfo {
+                id,
+                is_valid_comms: AtomicBool::new(false),
+                latency_bits: AtomicU8::new(Latency::unknown().to_bits()),
+                render_profile_settings_bits: AtomicU16::new(
+                    RenderProfileSettings::vanilla().to_bits(),
+                ),
+            });
+        } else if event == ConnectionChangedEvent::StationDisconnected {
+            if let Some(i) = stations_table.iter().position(|s| s.id == id) {
+                stations_table.remove(i);
+            }
+        }
+
+        CONNECTED_STATION_TABLE_ATOMIC_VIEW.store(Arc::new(stations_table.clone()));
+        drop(stations_table);
+
+        RenderProfileManager::instance()
+            .auto_select_profile(is_valid_online_mode(), new_num_connected > 1);
+    }
+}
+
 fn on_station_connection_changed(
     event: ConnectionChangedEvent,
     station: ConnectedStation,
     new_num_connected: usize,
 ) {
+    // Manager-thread callback, possibly mid-teardown: read the id, drop the
+    // handle, queue the event, restart the grace window. Nothing else.
     let id = station.get_id();
-    let mut stations_table = CONNECTED_STATION_TABLE_SYNCED_INTERNAL.lock().unwrap();
-    if event == ConnectionChangedEvent::StationConnected {
-        stations_table.push(StationNetInfo {
-            id,
-            is_valid_comms: AtomicBool::new(false),
-            latency_bits: AtomicU8::new(Latency::unknown().to_bits()),
-            render_profile_settings_bits: AtomicU16::new(
-                RenderProfileSettings::vanilla().to_bits(),
-            ),
-        });
-    } else if event == ConnectionChangedEvent::StationDisconnected {
-        if let Some(i) = stations_table.iter().position(|s| s.id == id) {
-            stations_table.remove(i);
-        }
-    }
-
-    CONNECTED_STATION_TABLE_ATOMIC_VIEW.store(Arc::new(stations_table.clone()));
-
-    RenderProfileManager::instance()
-        .auto_select_profile(is_valid_online_mode(), new_num_connected > 1);
+    crate::net::note_connection_disturbance();
+    push_conn_event(id, event, new_num_connected);
 }
 
 fn send_pia_data_hook(_station: ConnectedStation, data: &mut [u8]) {
