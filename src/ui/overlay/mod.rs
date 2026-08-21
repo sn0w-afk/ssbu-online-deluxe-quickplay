@@ -611,7 +611,6 @@ unsafe extern "C" fn draw() {
     crate::net::process_deferred_net_work();
     crate::perf_scaler::process_deferred_drs_pop();
     crate::net::enforce_ssbusync_arena_mark();
-    crate::render::profile::maybe_reapply_match_profile();
     let input_snapshot = OVERLAY_POLLER.snapshot();
     let toggle_window_buttons = check_overlay_toggle_buttons_pressed(&input_snapshot);
 

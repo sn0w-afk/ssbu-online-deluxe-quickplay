@@ -101,8 +101,9 @@ static PENDING_ARENA_MARK: AtomicU8 = AtomicU8::new(0);
 /// the OC sysmodule — exactly the kind of work that must not run while a scene
 /// load or session teardown is in flight. Scene hooks now only record which
 /// apply is pending; the swap executes from `process_deferred_net_work` once
-/// the transition/disturbance grace has fully expired. The existing
-/// `maybe_reapply_match_profile` drift check remains as the safety net.
+/// the transition/disturbance grace has fully expired. The arena mark is
+/// drained first in that same pass, so the profile always applies into an
+/// already-unrestricted session.
 fn request_match_apply(pending: u8) {
     PENDING_MATCH_APPLY.store(pending, Ordering::SeqCst);
 }

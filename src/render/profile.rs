@@ -587,35 +587,6 @@ pub(crate) fn match_cleanup() {
     );
 }
 
-/// Re-applies the selected render profile if the live environment flags have
-/// drifted from it during a valid online match.
-///
-/// ssbusync restricts its optimizations to offline/arena/local-online play: in
-/// quickplay it forces the vanilla runtime and silently drops non-vanilla
-/// env-flag requests. `net::mark_arena_mode_for_ssbusync` opts quickplay
-/// sessions out of that restriction, and this drift check is a safety net in
-/// case the flags still get reset (e.g. right at match start, after
-/// `match_init` applied the selected profile at stage presetup).
-pub(crate) fn maybe_reapply_match_profile() {
-    // Skipped during scene transitions: writing render env flags while the
-    // renderer is mid-teardown/rebuild (e.g. VS-screen loads) is a crash
-    // suspect — ssbusync drops/resets flags during transitions anyway.
-    if crate::net::is_scene_transition_active() {
-        return;
-    }
-    let profile_mode_active =
-        crate::net::is_valid_online_mode() || crate::render::offline_mode_enabled();
-    if !profile_mode_active || !crate::net::is_in_real_game() {
-        return;
-    }
-    let selected = RenderProfileManager::instance().selected_render_profile_settings();
-    let active = RenderProfileManager::active_render_profile_settings();
-    if selected.to_bits() != active.to_bits() {
-        println!("RENDER PROFILE DRIFT DETECTED, REAPPLYING SELECTED PROFILE");
-        RenderProfileManager::apply_render_profile_settings_immediate(&selected);
-    }
-}
-
 pub(super) fn on_nro_load() {
     let rc = RENDER_CONFIG.load();
     let menu_rp = rc.render_profile_config.menu;
